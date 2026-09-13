@@ -3,6 +3,10 @@ import pandas as pd
 import joblib
 import os
 import streamlit.components.v1 as components
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.pipeline import Pipeline
+from sklearn.ensemble import GradientBoostingRegressor
 
 
 # =========================================================
@@ -23,8 +27,67 @@ st.set_page_config(
 
 @st.cache_resource
 def load_model():
-    model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "house_price_model.pkl")
-    return joblib.load(model_path)
+    model_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "house_price_model.pkl"
+    )
+
+    # Local/dev path: use the already-trained model when it can be loaded.
+    # Streamlit Cloud may use a different Python/scikit-learn environment,
+    # so fall back to rebuilding the same Gradient Boosting pipeline.
+    try:
+        return joblib.load(model_path)
+
+    except Exception:
+        data_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "train.csv"
+        )
+
+        data = pd.read_csv(data_path)
+
+        features = [
+            "GrLivArea",
+            "BedroomAbvGr",
+            "FullBath",
+            "YearBuilt",
+            "OverallQual",
+            "GarageCars",
+            "TotalBsmtSF",
+            "1stFlrSF",
+            "Neighborhood"
+        ]
+
+        X = data[features]
+        y = data["SalePrice"]
+
+        preprocessor = ColumnTransformer(
+            transformers=[
+                (
+                    "neighborhood",
+                    OneHotEncoder(handle_unknown="ignore"),
+                    ["Neighborhood"]
+                )
+            ],
+            remainder="passthrough"
+        )
+
+        model = Pipeline([
+            ("preprocessor", preprocessor),
+            (
+                "regression",
+                GradientBoostingRegressor(
+                    n_estimators=200,
+                    learning_rate=0.05,
+                    max_depth=3,
+                    random_state=42
+                )
+            )
+        ])
+
+        model.fit(X, y)
+
+        return model
 
 
 model = load_model()
