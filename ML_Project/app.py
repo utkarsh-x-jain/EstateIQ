@@ -465,8 +465,8 @@ padding-bottom: 3rem;
 
 /* Scroll reveal */
 .reveal {{
-opacity: 0;
-transform: translateY(24px);
+opacity: 1;
+transform: translateY(0);
 transition: opacity 0.6s ease, transform 0.6s ease, box-shadow 0.25s ease;
 }}
 .reveal.in-view {{
