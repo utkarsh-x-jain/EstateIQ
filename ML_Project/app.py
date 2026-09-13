@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import joblib
+import os
 import streamlit.components.v1 as components
 
 
@@ -22,7 +23,8 @@ st.set_page_config(
 
 @st.cache_resource
 def load_model():
-    return joblib.load("house_price_model.pkl")
+    model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "house_price_model.pkl")
+    return joblib.load(model_path)
 
 
 model = load_model()
