@@ -465,8 +465,8 @@ padding-bottom: 3rem;
 
 /* Scroll reveal */
 .reveal {{
-opacity: 1;
-transform: translateY(0);
+opacity: 0;
+transform: translateY(24px);
 transition: opacity 0.6s ease, transform 0.6s ease, box-shadow 0.25s ease;
 }}
 .reveal.in-view {{
@@ -629,7 +629,7 @@ margin-bottom: 6px;
 background: var(--surface);
 border: 1px solid var(--badge-border);
 border-radius: 18px;
-padding: 30px 30px 34px 30px;
+padding: 24px 30px 24px 30px;
 height: 300px;
 min-height: 300px;
 max-height: 300px;
@@ -643,22 +643,22 @@ font-weight: 600;
 color: var(--text);
 margin-bottom: 4px;
 }}
-.prediction-subtitle {{ color: var(--text-muted); font-size: 0.85rem; margin-bottom: 26px; }}
+.prediction-subtitle {{ color: var(--text-muted); font-size: 0.85rem; margin-bottom: 16px; }}
 .prediction-price {{
 font-family: 'Space Grotesk', sans-serif;
 font-size: 2.5rem;
 font-weight: 700;
 color: var(--price);
-margin: 6px 0 22px 0;
+margin: 2px 0 14px 0;
 }}
-.prediction-label {{ color: var(--text-muted); font-size: 0.78rem; font-weight: 600; margin-bottom: 12px; }}
+.prediction-label {{ color: var(--text-muted); font-size: 0.78rem; font-weight: 600; margin-bottom: 8px; }}
 .prediction-note {{
 background: var(--field-bg);
 border: 1px solid var(--border);
 border-radius: 12px;
-padding: 13px;
-font-size: 0.78rem;
-line-height: 1.5;
+padding: 10px 12px;
+font-size: 0.74rem;
+line-height: 1.45;
 color: var(--text-muted);
 }}
 
