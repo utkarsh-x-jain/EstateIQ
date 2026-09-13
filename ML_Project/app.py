@@ -31,12 +31,6 @@ model = load_model()
 # =========================================================
 # THEME STATE
 # =========================================================
-# Streamlit's own theme (see .streamlit/config.toml) sets a stable
-# dark baseline so the page never flashes back to Streamlit's default
-# light theme on refresh. This toggle is a second, independent layer:
-# our own CSS palette drawn on top of that stable baseline, switched
-# with a button instead of Streamlit's built-in theme (which can't be
-# swapped at runtime without a restart).
 
 if "theme" not in st.session_state:
     st.session_state.theme = "dark"
@@ -48,27 +42,29 @@ def toggle_theme():
 
 PALETTES = {
     "dark": dict(
-        bg1="#16224f", bg2="#0a1130", bg3="#050813",
+        bg1="#16295b", bg2="#08142f", bg3="#040916",
         surface="rgba(255,255,255,0.035)", border="rgba(255,255,255,0.10)",
         text="#eef2fc", text_muted="#93a0c2",
         accent="#4f6ef7", accent_light="#9db8ff", price="#34e0a1",
-        input_bg="rgba(255,255,255,0.05)", scroll_color="#566089",
-        footer_color="#4f5670", badge_bg="rgba(79,110,247,0.10)",
-        badge_border="rgba(130,160,255,0.35)",
-        particle_dot="rgba(150,180,255,0.65)",
-        particle_line_rgb="130,160,255", particle_line_alpha=0.16,
+        field_bg="rgba(255,255,255,0.07)", field_border="rgba(255,255,255,0.16)",
+        scroll_color="#566089", footer_color="#4f5670",
+        badge_bg="rgba(79,110,247,0.10)", badge_border="rgba(130,160,255,0.35)",
+        nav_scrolled_bg="rgba(10,17,48,0.72)",
+        particle_dot="rgba(140,185,255,0.90)",
+        particle_line_rgb="105,155,255", particle_line_alpha=0.18,
         toggle_icon="☀️", toggle_help="Switch to light mode",
     ),
     "light": dict(
-        bg1="#eef2ff", bg2="#f6f8fd", bg3="#ffffff",
+        bg1="#dfeaff", bg2="#eef4ff", bg3="#f7faff",
         surface="rgba(20,30,70,0.04)", border="rgba(20,30,70,0.12)",
         text="#111935", text_muted="#57628a",
         accent="#4f6ef7", accent_light="#3552d8", price="#0f9d68",
-        input_bg="rgba(20,30,70,0.05)", scroll_color="#8792b5",
-        footer_color="#8792b5", badge_bg="rgba(79,110,247,0.08)",
-        badge_border="rgba(79,110,247,0.30)",
-        particle_dot="rgba(70,95,200,0.55)",
-        particle_line_rgb="70,95,200", particle_line_alpha=0.11,
+        field_bg="rgba(255,255,255,0.92)", field_border="rgba(70,90,135,0.28)",
+        scroll_color="#8792b5", footer_color="#8792b5",
+        badge_bg="rgba(79,110,247,0.08)", badge_border="rgba(79,110,247,0.30)",
+        nav_scrolled_bg="rgba(246,248,253,0.78)",
+        particle_dot="rgba(56,92,190,0.78)",
+        particle_line_rgb="70,100,190", particle_line_alpha=0.12,
         toggle_icon="🌙", toggle_help="Switch to dark mode",
     ),
 }
@@ -77,15 +73,19 @@ p = PALETTES[st.session_state.theme]
 
 
 # =========================================================
-# ANIMATED BACKGROUND (particle / valuation network)
+# ANIMATED BACKGROUND + SCROLL BEHAVIOR
 # =========================================================
-# st.markdown() strips <script> tags, so a plain markdown block can't
-# animate anything. This uses components.html (a real iframe that runs
-# JS) to draw a full-page canvas, then reaches into the parent
-# document to pin that canvas behind the Streamlit app as a fixed,
-# full-viewport background. On re-renders (e.g. the theme toggle) it
-# only updates the dot/line colors on the existing canvas instead of
-# rebuilding it, so there's no flicker or duplicate animation loops.
+# IMPORTANT FIX: components.html runs in an iframe that Streamlit
+# destroys and rebuilds on every rerun (every click, every keystroke).
+# The canvas element itself lives in the parent document and survives
+# that, but anything scheduled from inside the dying iframe --
+# requestAnimationFrame loops, addEventListener callbacks -- dies with
+# it. Previously the animation loop and scroll/resize listeners were
+# only ever started ONCE, so the very first rerun after page load
+# silently killed them. Now every rerun explicitly cancels the old
+# loop/listeners and rebinds fresh ones from the current, still-alive
+# iframe context. Node positions persist across reruns via
+# window.parent.__estateiqBg so the animation doesn't jump/reset.
 
 bg_script = """
 <script>
@@ -94,45 +94,83 @@ bg_script = """
     const win = window.parent;
 
     if (!win.__estateiqBg) { win.__estateiqBg = {}; }
-    win.__estateiqBg.dotColor = "__DOT_COLOR__";
-    win.__estateiqBg.lineRgb = "__LINE_RGB__";
-    win.__estateiqBg.lineAlpha = __LINE_ALPHA__;
+    const state = win.__estateiqBg;
+    state.dotColor = "__DOT_COLOR__";
+    state.lineRgb = "__LINE_RGB__";
+    state.lineAlpha = __LINE_ALPHA__;
+    state.bg1 = "__BG1__";
+    state.bg2 = "__BG2__";
+    state.bg3 = "__BG3__";
 
-    if (doc.getElementById('estateiq-bg-canvas')) { return; }
+    // ---- Fixed themed background layer + canvas: create once, reuse forever ----
+    let bgLayer = doc.getElementById('estateiq-bg-layer');
+    if (!bgLayer) {
+        bgLayer = doc.createElement('div');
+        bgLayer.id = 'estateiq-bg-layer';
+        bgLayer.style.position = 'fixed';
+        bgLayer.style.top = '0';
+        bgLayer.style.left = '0';
+        bgLayer.style.width = '100vw';
+        bgLayer.style.height = '100vh';
+        bgLayer.style.zIndex = '0';
+        bgLayer.style.pointerEvents = 'none';
+        bgLayer.style.transition = 'background 0.25s ease';
+        doc.body.prepend(bgLayer);
+    }
+    bgLayer.style.background = 'radial-gradient(circle at 50% -10%, ' + state.bg1 + ' 0%, ' + state.bg2 + ' 45%, ' + state.bg3 + ' 100%)';
 
-    const canvas = doc.createElement('canvas');
-    canvas.id = 'estateiq-bg-canvas';
-    canvas.style.position = 'fixed';
-    canvas.style.top = '0';
-    canvas.style.left = '0';
-    canvas.style.width = '100%';
-    canvas.style.height = '100%';
-    canvas.style.zIndex = '-1';
-    canvas.style.pointerEvents = 'none';
-    doc.body.prepend(canvas);
-
+    let canvas = doc.getElementById('estateiq-bg-canvas');
+    if (!canvas) {
+        canvas = doc.createElement('canvas');
+        canvas.id = 'estateiq-bg-canvas';
+        canvas.style.position = 'fixed';
+        canvas.style.top = '0';
+        canvas.style.left = '0';
+        canvas.style.width = '100%';
+        canvas.style.height = '100%';
+        canvas.style.zIndex = '1';
+        canvas.style.pointerEvents = 'none';
+        doc.body.prepend(canvas);
+    }
     const ctx = canvas.getContext('2d');
-    let w, h, nodes;
 
     function resize() {
-        w = canvas.width = win.innerWidth;
-        h = canvas.height = win.innerHeight;
-        const count = Math.max(28, Math.min(70, Math.floor((w * h) / 26000)));
-        nodes = Array.from({ length: count }, () => ({
-            x: Math.random() * w,
-            y: Math.random() * h,
-            vx: (Math.random() - 0.5) * 0.22,
-            vy: (Math.random() - 0.5) * 0.22,
-            r: Math.random() * 1.4 + 0.8
-        }));
+        canvas.width = win.innerWidth;
+        canvas.height = win.innerHeight;
+        // Sparser than a dense mesh: fewer nodes, spread wide, most of
+        // them small "stars" with the occasional bigger hub point.
+        const count = Math.max(28, Math.min(72, Math.floor((canvas.width * canvas.height) / 25000))); 
+        if (!state.nodes || state.nodes.length !== count) {
+            state.nodes = Array.from({ length: count }, () => {
+                const isHub = Math.random() < 0.12;
+                return {
+                    x: Math.random() * canvas.width,
+                    y: Math.random() * canvas.height,
+                    vx: (Math.random() - 0.5) * 0.14,
+                    vy: (Math.random() - 0.5) * 0.14,
+                    r: isHub ? (Math.random() * 0.8 + 2.0) : (Math.random() * 0.9 + 0.7),
+                    twinklePhase: Math.random() * Math.PI * 2,
+                    twinkleSpeed: Math.random() * 0.015 + 0.008
+                };
+            });
+        }
     }
+
+    // Rebind resize listener fresh every run (old one is dead anyway).
+    if (state.resizeHandler) { win.removeEventListener('resize', state.resizeHandler); }
+    state.resizeHandler = resize;
     win.addEventListener('resize', resize);
-    resize();
+    if (!state.nodes) { resize(); }
+
+    // Rebind the animation loop fresh every run.
+    if (state.rafId) { win.cancelAnimationFrame(state.rafId); }
+
+    const CONNECT_DIST = 235;
 
     function tick() {
+        const w = canvas.width, h = canvas.height;
         ctx.clearRect(0, 0, w, h);
-        const lineRgb = win.__estateiqBg.lineRgb;
-        const lineAlpha = win.__estateiqBg.lineAlpha;
+        const nodes = state.nodes;
 
         for (let i = 0; i < nodes.length; i++) {
             const a = nodes[i];
@@ -140,13 +178,14 @@ bg_script = """
             a.y += a.vy;
             if (a.x < 0 || a.x > w) a.vx *= -1;
             if (a.y < 0 || a.y > h) a.vy *= -1;
+            a.twinklePhase += a.twinkleSpeed;
 
             for (let j = i + 1; j < nodes.length; j++) {
                 const b = nodes[j];
                 const dx = a.x - b.x, dy = a.y - b.y;
                 const dist = Math.sqrt(dx * dx + dy * dy);
-                if (dist < 140) {
-                    ctx.strokeStyle = 'rgba(' + lineRgb + ',' + (lineAlpha * (1 - dist / 140)) + ')';
+                if (dist < CONNECT_DIST) {
+                    ctx.strokeStyle = 'rgba(' + state.lineRgb + ',' + (state.lineAlpha * (1 - dist / CONNECT_DIST)) + ')';
                     ctx.lineWidth = 1;
                     ctx.beginPath();
                     ctx.moveTo(a.x, a.y);
@@ -156,16 +195,56 @@ bg_script = """
             }
         }
 
-        ctx.fillStyle = win.__estateiqBg.dotColor;
         for (const n of nodes) {
+            const twinkle = 0.6 + 0.4 * Math.sin(n.twinklePhase);
+            ctx.globalAlpha = twinkle;
+            ctx.fillStyle = state.dotColor;
             ctx.beginPath();
             ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
             ctx.fill();
         }
+        ctx.globalAlpha = 1;
 
-        win.requestAnimationFrame(tick);
+        state.rafId = win.requestAnimationFrame(tick);
     }
     tick();
+
+    // ---- Scroll-aware sticky navbar (also rebind fresh) ----
+    const navRow = doc.querySelectorAll('[data-testid="stHorizontalBlock"]')[0];
+    if (navRow) {
+        navRow.style.position = 'sticky';
+        navRow.style.top = '0px';
+        navRow.style.zIndex = '999';
+        navRow.style.transition = 'background 0.3s ease, backdrop-filter 0.3s ease, box-shadow 0.3s ease';
+        navRow.style.padding = '10px 6px';
+        navRow.style.borderRadius = '0 0 16px 16px';
+
+        function onNavScroll() {
+            if (win.scrollY > 40) {
+                navRow.style.background = '__NAV_SCROLLED_BG__';
+                navRow.style.backdropFilter = 'blur(10px)';
+                navRow.style.boxShadow = '0 8px 30px rgba(0,0,0,0.20)';
+            } else {
+                navRow.style.background = 'transparent';
+                navRow.style.backdropFilter = 'none';
+                navRow.style.boxShadow = 'none';
+            }
+        }
+        if (state.navScrollHandler) { win.removeEventListener('scroll', state.navScrollHandler); }
+        state.navScrollHandler = onNavScroll;
+        win.addEventListener('scroll', onNavScroll);
+        onNavScroll();
+    }
+
+    // ---- Fade-up reveal on scroll (fresh observer every run) ----
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+            if (entry.isIntersecting) {
+                entry.target.classList.add('in-view');
+            }
+        });
+    }, { threshold: 0.15 });
+    doc.querySelectorAll('.reveal:not(.in-view)').forEach((el) => observer.observe(el));
 })();
 </script>
 """
@@ -175,6 +254,10 @@ bg_script = (
     .replace("__DOT_COLOR__", p["particle_dot"])
     .replace("__LINE_RGB__", p["particle_line_rgb"])
     .replace("__LINE_ALPHA__", str(p["particle_line_alpha"]))
+    .replace("__NAV_SCROLLED_BG__", p["nav_scrolled_bg"])
+    .replace("__BG1__", p["bg1"])
+    .replace("__BG2__", p["bg2"])
+    .replace("__BG3__", p["bg3"])
 )
 
 components.html(bg_script, height=0)
@@ -186,9 +269,12 @@ components.html(bg_script, height=0)
 # All HTML blocks below are written flush-left. Streamlit's markdown
 # renderer treats any line indented 4+ spaces as a preformatted code
 # block, which previously made the UI show raw <div> tags as text.
-# Backgrounds are also forced with !important on every Streamlit
-# container test-id, not just .stApp, since some containers ship
-# their own opaque background in the default theme.
+#
+# Input/select field selectors are intentionally redundant (class,
+# data-testid, and data-baseweb variants) because Streamlit's exact
+# DOM markup for these widgets has changed across versions, and the
+# app's own theme (config.toml, fixed to dark) otherwise wins over a
+# selector that doesn't match.
 
 st.markdown(f"""
 <style>
@@ -206,7 +292,8 @@ st.markdown(f"""
 --accent: {p["accent"]};
 --accent-light: {p["accent_light"]};
 --price: {p["price"]};
---input-bg: {p["input_bg"]};
+--field-bg: {p["field_bg"]};
+--field-border: {p["field_border"]};
 --scroll-color: {p["scroll_color"]};
 --footer-color: {p["footer_color"]};
 --badge-bg: {p["badge_bg"]};
@@ -223,12 +310,84 @@ html, body,
 [data-testid="stMain"],
 [data-testid="stHeader"],
 section.main {{
-background: radial-gradient(circle at 50% -10%, var(--bg1) 0%, var(--bg2) 45%, var(--bg3) 100%) !important;
+background: transparent !important;
+background-color: transparent !important;
 color: var(--text) !important;
-transition: background 0.25s ease, color 0.25s ease;
+transition: color 0.25s ease;
 }}
 
 [data-testid="stHeader"] {{ background: transparent !important; }}
+
+/* ===== Animated network background layer ===== */
+body {{
+background: transparent !important;
+background-color: transparent !important;
+}}
+
+.stApp,
+[data-testid="stAppViewContainer"],
+[data-testid="stMain"],
+section.main {{
+background: transparent !important;
+}}
+
+#estateiq-bg-layer {{
+position: fixed !important;
+top: 0 !important;
+left: 0 !important;
+width: 100vw !important;
+height: 100vh !important;
+z-index: 0 !important;
+pointer-events: none !important;
+}}
+
+#estateiq-bg-canvas {{
+position: fixed !important;
+top: 0 !important;
+left: 0 !important;
+width: 100vw !important;
+height: 100vh !important;
+z-index: 1 !important;
+pointer-events: none !important;
+display: block !important;
+opacity: 1 !important;
+}}
+
+[data-testid="stAppViewContainer"] > .main,
+[data-testid="stMainBlockContainer"] {{
+background: transparent !important;
+background-color: transparent !important;
+}}
+
+/* Every actual UI surface stays above the animation */
+.block-container,
+[data-testid="stHorizontalBlock"],
+[data-testid="stVerticalBlock"],
+[data-testid="stMainBlockContainer"] {{
+position: relative;
+z-index: 2;
+}}
+
+/* Never let Streamlit's base theme paint over the selected mode */
+html, body, [data-testid="stAppViewContainer"], [data-testid="stMain"], [data-testid="stHeader"] {{
+background: transparent !important;
+background-color: transparent !important;
+}}
+
+#estateiq-bg-layer {{
+position: fixed !important;
+top: 0 !important;
+left: 0 !important;
+width: 100vw !important;
+height: 100vh !important;
+z-index: 0 !important;
+pointer-events: none !important;
+}}
+
+#estateiq-bg-canvas {{
+position: fixed !important;
+z-index: 1 !important;
+}}
 
 #MainMenu {{ visibility: hidden; }}
 footer {{ visibility: hidden; }}
@@ -237,6 +396,17 @@ footer {{ visibility: hidden; }}
 max-width: 1180px;
 padding-top: 0.5rem;
 padding-bottom: 3rem;
+}}
+
+/* Scroll reveal */
+.reveal {{
+opacity: 0;
+transform: translateY(24px);
+transition: opacity 0.6s ease, transform 0.6s ease, box-shadow 0.25s ease;
+}}
+.reveal.in-view {{
+opacity: 1;
+transform: translateY(0);
 }}
 
 /* Navbar */
@@ -266,8 +436,7 @@ text-decoration: none;
 white-space: nowrap;
 }}
 
-/* Theme toggle button (a real Streamlit button, styled as a small
-   round icon pill so it reads as a control, not a text link) */
+/* Theme toggle button */
 div[data-testid="column"]:has(button[kind="secondary"]) {{
 display: flex;
 align-items: center;
@@ -284,15 +453,10 @@ padding: 0 !important;
 font-size: 1.05rem !important;
 min-height: 42px !important;
 }}
-button[kind="secondary"]:hover {{
-border-color: var(--accent) !important;
-}}
+button[kind="secondary"]:hover {{ border-color: var(--accent) !important; }}
 
 /* Hero */
-.hero-wrap {{
-text-align: center;
-padding: 60px 20px 40px 20px;
-}}
+.hero-wrap {{ text-align: center; padding: 60px 20px 40px 20px; }}
 .hero-badge {{
 display: inline-block;
 border: 1px solid var(--badge-border);
@@ -340,12 +504,7 @@ font-weight: 600;
 font-size: 0.95rem;
 text-decoration: none;
 }}
-.hero-scroll {{
-color: var(--scroll-color);
-font-size: 0.7rem;
-font-weight: 600;
-letter-spacing: 2px;
-}}
+.hero-scroll {{ color: var(--scroll-color); font-size: 0.7rem; font-weight: 600; letter-spacing: 2px; }}
 
 /* Cards */
 .card {{
@@ -354,7 +513,43 @@ border: 1px solid var(--border);
 border-radius: 18px;
 padding: 26px;
 backdrop-filter: blur(6px);
+box-sizing: border-box;
 }}
+.card:hover {{ transform: translateY(-3px); box-shadow: 0 14px 34px rgba(0,0,0,0.16); }}
+
+/* Top property/result cards: same footprint, no accidental stretching */
+.property-card {{
+height: 300px;
+box-sizing: border-box;
+display: flex;
+flex-direction: column;
+justify-content: space-between;
+padding-bottom: 32px;
+}}
+
+.prediction-card {{
+height: 300px;
+min-height: 300px;
+box-sizing: border-box;
+}}
+
+/* Feature cards: all four cards stay exactly the same size */
+.feature-card {{
+height: 225px;
+min-height: 225px;
+max-height: 225px;
+box-sizing: border-box;
+display: flex;
+flex-direction: column;
+justify-content: flex-start;
+padding: 24px 24px 34px 24px;
+}}
+
+.feature-card .feature-copy {{
+margin-top: auto;
+padding-top: 14px;
+}}
+
 .card-title {{
 font-family: 'Space Grotesk', sans-serif;
 color: var(--text);
@@ -362,19 +557,18 @@ font-size: 1.15rem;
 font-weight: 600;
 margin-bottom: 6px;
 }}
-.card-subtitle {{
-color: var(--text-muted);
-font-size: 0.86rem;
-line-height: 1.5;
-}}
+.card-subtitle {{ color: var(--text-muted); font-size: 0.86rem; line-height: 1.5; }}
 
 /* Prediction card */
 .prediction-card {{
 background: var(--surface);
 border: 1px solid var(--badge-border);
 border-radius: 18px;
-padding: 30px;
+padding: 30px 30px 34px 30px;
+height: 300px;
 min-height: 300px;
+max-height: 300px;
+box-sizing: border-box;
 backdrop-filter: blur(6px);
 }}
 .prediction-title {{
@@ -384,11 +578,7 @@ font-weight: 600;
 color: var(--text);
 margin-bottom: 4px;
 }}
-.prediction-subtitle {{
-color: var(--text-muted);
-font-size: 0.85rem;
-margin-bottom: 26px;
-}}
+.prediction-subtitle {{ color: var(--text-muted); font-size: 0.85rem; margin-bottom: 26px; }}
 .prediction-price {{
 font-family: 'Space Grotesk', sans-serif;
 font-size: 2.5rem;
@@ -396,14 +586,9 @@ font-weight: 700;
 color: var(--price);
 margin: 6px 0 22px 0;
 }}
-.prediction-label {{
-color: var(--text-muted);
-font-size: 0.78rem;
-font-weight: 600;
-margin-bottom: 12px;
-}}
+.prediction-label {{ color: var(--text-muted); font-size: 0.78rem; font-weight: 600; margin-bottom: 12px; }}
 .prediction-note {{
-background: var(--input-bg);
+background: var(--field-bg);
 border: 1px solid var(--border);
 border-radius: 12px;
 padding: 13px;
@@ -417,10 +602,14 @@ color: var(--text-muted);
 background: var(--surface);
 border: 1px solid var(--border);
 border-radius: 14px;
-padding: 20px;
-height: 140px;
+padding: 22px 20px 26px 20px;
+height: 160px;
+min-height: 160px;
+max-height: 160px;
+box-sizing: border-box;
 backdrop-filter: blur(6px);
 }}
+.metric-card:hover {{ transform: translateY(-3px); box-shadow: 0 14px 34px rgba(0,0,0,0.16); }}
 .metric-icon {{ font-size: 1.25rem; }}
 .metric-value {{
 font-family: 'Space Grotesk', sans-serif;
@@ -455,22 +644,72 @@ font-size: 0.98rem !important;
 padding: 0.7rem 1rem !important;
 transition: 0.2s;
 }}
-button[kind="primary"]:hover {{
-transform: translateY(-1px);
-filter: brightness(1.08);
-}}
+button[kind="primary"]:hover {{ transform: translateY(-1px); filter: brightness(1.08); }}
 
-/* Inputs */
+/* ===== Input / select fields (broad, redundant selectors) ===== */
+
 .stNumberInput label, .stSelectbox label {{
 color: var(--text-muted) !important;
 font-weight: 600 !important;
 font-size: 0.8rem !important;
 }}
-.stNumberInput input, .stSelectbox div[data-baseweb="select"] > div {{
-background-color: var(--input-bg) !important;
-color: var(--text) !important;
-border-color: var(--border) !important;
+
+.stNumberInput > div,
+.stTextInput > div,
+.stSelectbox > div,
+[data-testid="stNumberInput"],
+[data-testid="stNumberInputContainer"],
+[data-testid="stSelectbox"] {{
+background: var(--field-bg) !important;
+background-color: var(--field-bg) !important;
+border-radius: 10px !important;
 }}
+
+.stNumberInput input,
+.stTextInput input,
+[data-testid="stNumberInput"] input,
+[data-testid="stNumberInputContainer"] input,
+[data-testid="stTextInput"] input,
+div[data-baseweb="input"] input,
+div[data-baseweb="base-input"] input {{
+background-color: var(--field-bg) !important;
+background: var(--field-bg) !important;
+color: var(--text) !important;
+-webkit-text-fill-color: var(--text) !important;
+caret-color: var(--text) !important;
+opacity: 1 !important;
+border: 1px solid var(--field-border) !important;
+border-radius: 10px !important;
+}}
+
+.stNumberInput input:focus,
+[data-testid="stNumberInput"] input:focus,
+div[data-baseweb="input"]:focus-within,
+div[data-baseweb="base-input"]:focus-within {{
+border-color: var(--accent) !important;
+box-shadow: 0 0 0 3px rgba(79,110,247,0.18) !important;
+}}
+
+[data-testid="stNumberInput"] button,
+[data-testid="stNumberInputContainer"] button {{
+background-color: var(--field-bg) !important;
+color: var(--text) !important;
+border: 1px solid var(--field-border) !important;
+}}
+
+.stSelectbox div[data-baseweb="select"] > div,
+[data-testid="stSelectbox"] div[data-baseweb="select"] > div {{
+background-color: var(--field-bg) !important;
+color: var(--text) !important;
+border: 1px solid var(--field-border) !important;
+border-radius: 10px !important;
+}}
+.stSelectbox div[data-baseweb="select"] span {{ color: var(--text) !important; }}
+
+div[data-baseweb="popover"] ul,
+div[data-baseweb="menu"] {{ background-color: var(--surface) !important; }}
+div[data-baseweb="menu"] li {{ color: var(--text) !important; background-color: transparent !important; }}
+div[data-baseweb="menu"] li:hover {{ background-color: var(--field-bg) !important; }}
 
 /* Footer */
 .footer {{
@@ -510,13 +749,16 @@ with nav_links:
 """, unsafe_allow_html=True)
 
 with nav_toggle:
-    st.button(
+    if st.button(
         p["toggle_icon"],
         key="theme_toggle_btn",
-        on_click=toggle_theme,
         help=p["toggle_help"],
         type="secondary",
-    )
+    ):
+        st.session_state.theme = (
+            "light" if st.session_state.theme == "dark" else "dark"
+        )
+        st.rerun()
 
 with nav_cta:
     st.markdown("""
@@ -563,9 +805,10 @@ left, right = st.columns([1.55, 1], gap="large")
 with left:
 
     st.markdown("""
-<div class="card">
+<div class="card property-card reveal">
 <div class="card-title">Property details</div>
 <div class="card-subtitle">Enter the key details of the property to get an estimated price.</div>
+<div style="margin-top:auto; padding-top:18px; color:var(--accent-light); font-size:0.72rem; font-weight:700;">9 property signals · AI valuation engine</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -681,7 +924,7 @@ with right:
     if prediction is None:
 
         st.markdown("""
-<div class="prediction-card">
+<div class="prediction-card reveal">
 <div class="prediction-title">Prediction result</div>
 <div class="prediction-subtitle">Based on your property details</div>
 <div class="prediction-price">₹ —</div>
@@ -695,7 +938,7 @@ Enter your property details and click <b>Estimate house price</b> to generate a 
     else:
 
         st.markdown(f"""
-<div class="prediction-card">
+<div class="prediction-card reveal">
 <div class="prediction-title">Prediction result</div>
 <div class="prediction-subtitle">Based on your property details</div>
 <div class="prediction-price">₹ {prediction:,.0f}</div>
@@ -749,7 +992,7 @@ m1, m2, m3 = st.columns(3)
 
 with m1:
     st.markdown("""
-<div class="metric-card">
+<div class="metric-card reveal" style="transition-delay:0s;">
 <div class="metric-icon">🏆</div>
 <div class="metric-value">90.19%</div>
 <div class="metric-label">R² SCORE</div>
@@ -760,7 +1003,7 @@ with m1:
 
 with m2:
     st.markdown("""
-<div class="metric-card">
+<div class="metric-card reveal" style="transition-delay:0.1s;">
 <div class="metric-icon">🎯</div>
 <div class="metric-value">₹18,080</div>
 <div class="metric-label">MEAN ABSOLUTE ERROR</div>
@@ -771,7 +1014,7 @@ with m2:
 
 with m3:
     st.markdown("""
-<div class="metric-card">
+<div class="metric-card reveal" style="transition-delay:0.2s;">
 <div class="metric-icon">⚙️</div>
 <div class="metric-value">Gradient Boosting</div>
 <div class="metric-label">MODEL TYPE</div>
@@ -796,40 +1039,48 @@ w1, w2, w3, w4 = st.columns(4)
 
 with w1:
     st.markdown("""
-<div class="card">
+<div class="card feature-card reveal" style="transition-delay:0s;">
 <div style="font-size:1.3rem;">📊</div>
+<div class="feature-copy">
 <b>Data-driven estimates</b>
-<p style="color:var(--text-muted);font-size:0.75rem;">Powered by real housing data and machine learning.</p>
+<p style="color:var(--text-muted);font-size:0.75rem; margin-bottom:0;">Powered by real housing data and machine learning.</p>
+</div>
 </div>
 """, unsafe_allow_html=True)
 
 
 with w2:
     st.markdown("""
-<div class="card">
+<div class="card feature-card reveal" style="transition-delay:0.1s;">
 <div style="font-size:1.3rem;">⚙️</div>
+<div class="feature-copy">
 <b>Multiple models</b>
-<p style="color:var(--text-muted);font-size:0.75rem;">Compared Linear Regression, Random Forest and Gradient Boosting.</p>
+<p style="color:var(--text-muted);font-size:0.75rem; margin-bottom:0;">Compared Linear Regression, Random Forest and Gradient Boosting.</p>
+</div>
 </div>
 """, unsafe_allow_html=True)
 
 
 with w3:
     st.markdown("""
-<div class="card">
+<div class="card feature-card reveal" style="transition-delay:0.2s;">
 <div style="font-size:1.3rem;">🎯</div>
+<div class="feature-copy">
 <b>Accurate and reliable</b>
-<p style="color:var(--text-muted);font-size:0.75rem;">High prediction accuracy based on historical housing data.</p>
+<p style="color:var(--text-muted);font-size:0.75rem; margin-bottom:0;">High prediction accuracy based on historical housing data.</p>
+</div>
 </div>
 """, unsafe_allow_html=True)
 
 
 with w4:
     st.markdown("""
-<div class="card">
+<div class="card feature-card reveal" style="transition-delay:0.3s;">
 <div style="font-size:1.3rem;">🏠</div>
+<div class="feature-copy">
 <b>Easy to use</b>
-<p style="color:var(--text-muted);font-size:0.75rem;">Get a price estimate by entering simple property details.</p>
+<p style="color:var(--text-muted);font-size:0.75rem; margin-bottom:0;">Get a price estimate by entering simple property details.</p>
+</div>
 </div>
 """, unsafe_allow_html=True)
 
