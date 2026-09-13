@@ -463,11 +463,11 @@ padding-top: 0.5rem;
 padding-bottom: 3rem;
 }}
 
-/* Scroll reveal */
+/* Scroll reveal — keep cards visible so they are not hidden when Streamlit reruns */
 .reveal {{
-opacity: 0;
-transform: translateY(24px);
-transition: opacity 0.6s ease, transform 0.6s ease, box-shadow 0.25s ease;
+opacity: 1;
+transform: translateY(0);
+transition: box-shadow 0.25s ease;
 }}
 .reveal.in-view {{
 opacity: 1;
